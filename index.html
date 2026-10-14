@@ -70,6 +70,9 @@ th{font-size:12px;color:var(--mute);font-weight:500}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(20px + env(safe-area-inset-bottom,0px));background:var(--fg);color:var(--bg);padding:8px 16px;border-radius:8px;font-size:13px;max-width:90vw}
 .edit{border:1px dashed var(--accent);border-radius:8px;padding:12px;background:var(--bg)}
 .chk{display:inline-flex;align-items:center;gap:4px;color:var(--fg);font-size:13px}
+.me-head{display:grid;gap:10px;border-color:var(--accent)}
+.big{font-family:var(--display);font-size:clamp(20px,4vw,26px)}
+.big b{color:var(--warn);font-variant-numeric:tabular-nums}
 .ai-out{white-space:pre-wrap;font-size:13px;background:var(--bg);border-radius:6px;padding:10px;margin-top:8px}
 </style>
 </head>
@@ -90,20 +93,22 @@ th{font-size:12px;color:var(--mute);font-weight:500}
     <li><b>“公平”因人而异</b> → 每类费用单独约定分法：房租按面积，水电按在住天数，出差的人自动少付；单笔也能改参与人和比例。</li>
     <li><b>纸巾鸡蛋算不清</b> → 只在补货时记一次，默认按在住天数分；只有明显不均才调整。</li>
     <li><b>作息和卫生习惯不说出口</b> → 入住时对比习惯差异，先谈差异最大的；匿名提醒处理当面难开口的小事。</li>
-    <li><b>AI 是可选的</b> → 不配置模型也能用（规则解析）；在“设置”里填入任意兼容 OpenAI 接口的免费或低价模型即可增强。</li>
+    <li><b>每个人只关心三件事</b> → “我的”页直接回答：我要付多少、钱花在哪、今天明天要做什么。</li>
+    <li><b>后续计划</b> → 多人实时同步；接入大模型做小票识别和公约起草（代码已预留接口）。</li>
   </ul>
 </details>
 
 <form class="quick" id="fQuick">
   <input id="qText" placeholder="一句话记账，如：阿杰交了 286 电费，雯雯出差不算" aria-label="一句话记账">
   <button class="btn">记一笔</button>
-  <div class="meta" id="qHint" style="width:100%">当前解析方式：<span id="qMode"></span></div>
+  <div class="meta" id="qHint" style="width:100%">写清金额、谁付的、谁不参与即可，分法按约定自动套用。<span id="qMode" hidden></span></div>
 </form>
 
-<div class="summary" id="summary"></div>
+<div class="summary" id="summary" hidden></div>
 
 <nav id="nav">
-  <button data-t="money" class="on">本月账单</button>
+  <button data-t="mine" class="on">我的</button>
+  <button data-t="money">本月账单</button>
   <button data-t="import">导入账单</button>
   <button data-t="supply">公共物品</button>
   <button data-t="clean">清洁值日</button>
@@ -111,8 +116,28 @@ th{font-size:12px;color:var(--mute);font-weight:500}
   <button data-t="settings">成员与设置</button>
 </nav>
 
+<!-- 我的 -->
+<section id="mine">
+  <div class="panel me-head">
+    <label class="chk" style="font-size:14px">我是 <select id="me"></select></label>
+    <div id="meMoney"></div>
+  </div>
+  <div class="grid2">
+    <div class="panel">
+      <h2>今天和明天要做的事</h2>
+      <p class="hint">值日、轮到的补货、等你表决的公约，都汇总在这里。</p>
+      <div class="list" id="meTodo"></div>
+    </div>
+    <div class="panel">
+      <h2>这个月我花在哪了</h2>
+      <p class="hint">只算你应承担的部分，已扣除出差减免。</p>
+      <div class="list" id="meSpend"></div>
+    </div>
+  </div>
+</section>
+
 <!-- 本月账单 -->
-<section id="money">
+<section id="money" hidden>
   <div class="grid2">
     <div class="panel">
       <h2>谁该给谁</h2>
@@ -147,7 +172,7 @@ th{font-size:12px;color:var(--mute);font-weight:500}
     <div class="row" style="margin-top:8px"><button class="btn" id="impParse">识别公共开销</button></div>
     <div class="list" id="impList" style="margin-top:10px"></div>
   </div>
-  <div class="panel">
+  <div class="panel" hidden>
     <h2>拍照识别小票</h2>
     <p class="hint">上传电费单或超市小票，由视觉模型识别金额和类别。需要在“设置”中配置支持图片的模型。</p>
     <div class="row"><label>小票图片<input type="file" id="ocrFile" accept="image/*"></label></div>
@@ -239,7 +264,7 @@ th{font-size:12px;color:var(--mute);font-weight:500}
       <button class="btn">添加</button>
     </form>
   </div>
-  <div class="panel">
+  <div class="panel" hidden>
     <h2>AI 模型（可选）</h2>
     <p class="hint">支持任意兼容 OpenAI 接口的模型。密钥只保存在你自己的浏览器里。不配置时，一句话记账使用内置规则解析。</p>
     <div class="row">
@@ -290,7 +315,25 @@ const yuan=x=>"¥"+(+x).toFixed(2);
 const N=()=>S.people.length;
 const stayDays=i=>Math.max(0,DAYS-(+S.people[i].away||0));
 function toast(m){const t=$("toast");t.textContent=m;t.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>t.hidden=true,2600)}
-const aiOn=()=>!!(AI.base&&AI.key&&AI.model);
+const aiOn=()=>false; // AI 接口已预留，雏形阶段关闭
+let ME=0; try{ME=+localStorage.getItem("flatMe")||0}catch(e){}
+const CAT_COLORS={"房租":"#2f6b57","水电燃气":"#b5562c","网费":"#5a5fa8","日用品":"#8a6d1f","食材":"#3b7a8a","其他":"#7a3f6b"};
+function renderMine(st,wp,today){if(ME>=N())ME=0;
+ $("me").innerHTML=S.people.map((p,i)=>`<option value="${i}" ${i===ME?"selected":""}>${esc(p.n)}</option>`).join("");
+ const pay=st.filter(x=>x[0]===ME),get=st.filter(x=>x[1]===ME);
+ const owe=pay.reduce((a,x)=>a+x[2],0),recv=get.reduce((a,x)=>a+x[2],0);
+ $("meMoney").innerHTML=`<div class="big">${owe>0.01?`本月你需要付 <b>${yuan(owe)}</b>`:recv>0.01?`本月你将收到 <b>${yuan(recv)}</b>`:"本月你已结清"}</div>
+ <div class="list">${pay.map(([a,b,m])=>`<div class="item"><span>转给 ${av(b)} ${esc(S.people[b].n)}</span><b>${yuan(m)}</b></div>`).join("")}${get.map(([a,b,m])=>`<div class="item"><span>${av(a)} ${esc(S.people[a].n)} 转给你</span><b>${yuan(m)}</b></div>`).join("")}</div>
+ <div class="meta">已自动抵扣你垫付的钱。在住 ${stayDays(ME)}/${DAYS} 天。</div>`;
+ const by={};let tot=0;allExp().forEach(e=>{const s=shares(e)[ME];if(s<0.005)return;by[e.cat]=(by[e.cat]||0)+s;tot+=s});
+ const rows=Object.entries(by).sort((a,b)=>b[1]-a[1]);
+ $("meSpend").innerHTML=`<div class="item"><span>合计应承担</span><b style="font-family:var(--display);font-size:18px">${yuan(tot)}</b></div>`+rows.map(([c,v])=>`<div><div class="row" style="justify-content:space-between"><span>${esc(c)}</span><span>${yuan(v)} <span class="meta">${(v/tot*100).toFixed(0)}%</span></span></div><div class="bar"><i style="width:${v/tot*100}%;background:${CAT_COLORS[c]||"var(--accent)"}"></i></div></div>`).join("");
+ const items=[];
+ [[today,"今天"],[(today+1)%7,"明天"]].forEach(([d,lbl])=>{wp[d].tasks.filter(t=>t.who===ME).forEach(t=>items.push(`<label class="item chk ${S.done[t.key]?"chore done":""}"><span><input type="checkbox" data-c="${t.key}" ${S.done[t.key]?"checked":""}> <span>${esc(t.c)}</span></span><span class="pill">${lbl}值日</span></label>`))});
+ S.sup.forEach((s,k)=>{if(s.qty<=Math.max(1,Math.ceil(s.pack*0.25))&&(S.buyTurn+k)%N()===ME)items.push(`<div class="item"><span>补货：${esc(s.name)}（剩 ${s.qty}${esc(s.unit)}）</span><button class="btn sm" data-buy="${k}">已买，记账</button></div>`)});
+ S.rules.forEach((r,k)=>{if(!r.ok[ME])items.push(`<div class="item"><span>表决公约：${esc(r.t)}</span><button class="btn sm" data-r="${k}-${ME}">同意</button></div>`)});
+ $("meTodo").innerHTML=items.join("")||'<div class="note">今天和明天都没有你的任务。</div>';
+}
 
 /* ---------- 分摊计算 ---------- */
 function allExp(){return S.fixed.map(f=>({name:f.name,amt:f.amt,payer:f.payer,cat:f.cat,mode:S.cats[f.cat]||"equal",inc:S.people.map(()=>1),auto:1})).concat(S.exp)}
@@ -319,6 +362,7 @@ function render(){
  <div class="tile"><small>待结算转账</small><b>${st.length} 笔</b><span class="sub">${st[0]?esc(S.people[st[0][0]].n)+" → "+esc(S.people[st[0][1]].n)+" "+yuan(st[0][2]):"已结清"}</span></div>
  <div class="tile ${low.length?"alert":""}"><small>需要补货</small><b>${low.length} 项</b><span class="sub">${low.map(s=>esc(s.name)).join("、")||"都够用"}</span></div>
  <div class="tile ${pend?"alert":""}"><small>今日值日 / 待表决公约</small><b>${todo} 项 / ${pend} 条</b><span class="sub">周${wp[today].day}</span></div>`;
+ renderMine(st,wp,today);
  const opts=S.people.map((p,i)=>`<option value="${i}">${esc(p.n)}</option>`).join("");
  ["impPayer","fxPayer"].forEach(id=>{const v=$(id).value;$(id).innerHTML=opts;if(v&&+v<N())$(id).value=v});
  $("fxCat").innerHTML=Object.keys(S.cats).map(c=>`<option>${esc(c)}</option>`).join("");
@@ -420,7 +464,7 @@ $("fNudge").onsubmit=async e=>{e.preventDefault();let t=$("nText").value.trim();
 
 /* ---------- 事件 ---------- */
 document.addEventListener("click",e=>{const t=e.target.closest("button");if(!t)return;const d=t.dataset;
- if(t.parentElement.id==="nav"){document.querySelectorAll("#nav button").forEach(b=>b.classList.toggle("on",b===t));["money","import","supply","clean","rules","settings"].forEach(id=>$(id).hidden=id!==d.t);try{localStorage.setItem("flatTab",d.t)}catch(e){}return}
+ if(t.parentElement.id==="nav"){document.querySelectorAll("#nav button").forEach(b=>b.classList.toggle("on",b===t));["mine","money","import","supply","clean","rules","settings"].forEach(id=>$(id).hidden=id!==d.t);try{localStorage.setItem("flatTab",d.t)}catch(e){}return}
  if(d.edit!==undefined){openEdit(+d.edit);return}
  if(d.closeedit){$("editBox").innerHTML="";return}
  if(d.saveedit!==undefined){const x=S.exp[+d.saveedit];x.mode=$("edMode").value;x.inc=S.people.map((_,i)=>$("edInc"+i).checked?1:0);x.w=S.people.map((_,i)=>+$("edW"+i).value||0);x.note=$("edNote").value;$("editBox").innerHTML="";toast("已更新分摊")}
@@ -441,6 +485,7 @@ document.addEventListener("click",e=>{const t=e.target.closest("button");if(!t)r
  else return;
  save();render()});
 document.addEventListener("change",e=>{const t=e.target,d=t.dataset;
+ if(t.id==="me"){ME=+t.value;try{localStorage.setItem("flatMe",ME)}catch(e){}render();return}
  if(d.c){S.done[d.c]=t.checked}else if(d.away!==undefined){S.people[+d.away].away=Math.min(DAYS,Math.max(0,+t.value||0))}
  else if(d.room!==undefined){S.people[+d.room].room=+t.value||0}else if(d.cat){S.cats[d.cat]=t.value}
  else if(d.hb){const[r,c]=d.hb.split("-").map(Number);S.habits[r][c]=t.value}
